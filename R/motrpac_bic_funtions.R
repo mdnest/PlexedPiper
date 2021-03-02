@@ -82,10 +82,11 @@ make_rii_peptide_gl <- function(msnid, masic_data, fractions, samples,
     as.data.frame() %>% 
     rownames_to_column('ids') %>% 
     mutate(protein_id = sub("(^.*)\\.\\d+@.*", "\\1", ids),
-           sequence = sub("(^.*)@(.*)", "\\2", ids)) %>% 
+           sequence = sub("(^.*)@(.*)", "\\2", ids),
+           organism_name = org_name) %>% 
     dplyr::select(-ids) %>%
     inner_join(conv) %>% 
-    dplyr::select(protein_id, sequence, gene_symbol, entrez_id, everything())
+    dplyr::select(protein_id, organism_name, sequence, gene_symbol, entrez_id, everything())
   
   return(crosstab)
   
@@ -109,10 +110,11 @@ make_results_ratio_gl <- function(msnid, masic_data, fractions, samples,
   crosstab <- crosstab %>% 
     as.data.frame() %>% 
     rownames_to_column('protein_id') %>% 
-    mutate(protein_id = sub("(.P_.*)\\.\\d+", "\\1", protein_id))
+    mutate(protein_id = sub("(.P_.*)\\.\\d+", "\\1", protein_id),
+           organism_name = org_name)
   
   results_ratio <- inner_join(crosstab, conv) %>% 
-    dplyr::select(protein_id, gene_symbol, entrez_id, everything())
+    dplyr::select(protein_id, organism_name, gene_symbol, entrez_id, everything())
   
   return(results_ratio)
 }
@@ -173,8 +175,9 @@ make_rii_peptide_ph <- function(msnid, masic_data, fractions, samples, reference
     mutate(confident_site = dplyr::case_when(confident_score >= 17 ~ TRUE,
                                              confident_score < 17 ~ FALSE),
            ptm_id = gsub("-", sep, ptm_id),
-           ptm_peptide = gsub("-", sep, ptm_peptide)) %>% 
-    dplyr::select(protein_id, sequence, ptm_id, ptm_peptide, gene_symbol, entrez_id, confident_score, confident_site, everything()) %>% 
+           ptm_peptide = gsub("-", sep, ptm_peptide),
+           organism_name = org_name) %>% 
+    dplyr::select(protein_id, organism_name, sequence, ptm_id, ptm_peptide, gene_symbol, entrez_id, confident_score, confident_site, everything()) %>% 
     distinct()
   return(crosstab)
 }
@@ -214,10 +217,11 @@ make_results_ratio_ph <- function(msnid, masic_data, fractions, samples,
   crosstab <- crosstab %>% 
     mutate(confident_site = dplyr::case_when(confident_score >= 17 ~ TRUE,
                                              confident_score < 17 ~ FALSE),
-           ptm_id = gsub("-", sep, ptm_id)) %>% 
-    dplyr::select(ptm_id, protein_id, gene_symbol, entrez_id, confident_score, confident_site, everything())
+           ptm_id = gsub("-", sep, ptm_id),
+           organism_name = org_name) %>% 
+    dplyr::select(ptm_id, organism_name, protein_id, gene_symbol, entrez_id, confident_score, confident_site, everything())
   
-  crosstab[, c(7:ncol(crosstab))] <- signif(crosstab[, c(7:ncol(crosstab))], 3)
+  crosstab[, c(8:ncol(crosstab))] <- signif(crosstab[, c(8:ncol(crosstab))], 3)
   return(crosstab)
   
 }
