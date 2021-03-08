@@ -26,7 +26,7 @@
 #' @importFrom dplyr select inner_join left_join mutate %>% case_when rename group_by summarize summarize_all
 #' @importFrom tibble rownames_to_column
 #' @importFrom purrr map
-#' @importFrom IRanges IRangesList reduce
+#' @importFrom IRanges IRanges IRangesList reduce
 #'
 #'
 #' @name motrpac_bic_output
