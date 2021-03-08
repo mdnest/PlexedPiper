@@ -80,7 +80,7 @@ make_rii_peptide_gl <- function(msnid, masic_data, fractions, samples,
   x <- fetch_conversion_table(org_name, from = "REFSEQ", "SYMBOL")
   y <- fetch_conversion_table(org_name, from = "REFSEQ", "ENTREZID")
   conv <- inner_join(x, y) %>% 
-    dplyr::rename(protein_id = REFSEQ,
+    dplyr::rename(protein_id_stripped = REFSEQ,
                   gene_symbol = SYMBOL,
                   entrez_id = ENTREZID)
   
@@ -90,8 +90,10 @@ make_rii_peptide_gl <- function(msnid, masic_data, fractions, samples,
     mutate(protein_id = sub("(^.*\\.\\d+)@.*", "\\1", ids),
            sequence = sub("(^.*)@(.*)", "\\2", ids),
            organism_name = org_name) %>% 
+    mutate(protein_id_stripped = sub("(^.*)\\.\\d+", "\\1", protein_id)) %>%
     dplyr::select(-ids) %>%
-    inner_join(conv) %>% 
+    inner_join(conv, by="protein_id_stripped") %>% 
+    dplyr::select(-protein_id_stripped) %>%
     dplyr::select(organism_name,  gene_symbol, entrez_id, protein_id, sequence, everything())
   
   return(crosstab)
@@ -110,13 +112,18 @@ make_results_ratio_gl <- function(msnid, masic_data, fractions, samples,
   x <- fetch_conversion_table(org_name, from = "REFSEQ", "SYMBOL")
   y <- fetch_conversion_table(org_name, from = "REFSEQ", "ENTREZID")
   conv <- inner_join(x, y) %>% 
-    dplyr::rename(protein_id = REFSEQ,
+    dplyr::rename(protein_id_stripped = REFSEQ,
                   gene_symbol = SYMBOL,
                   entrez_id = ENTREZID)
+    
   
   crosstab <- crosstab %>% 
     as.data.frame() %>% 
-    rownames_to_column('protein_id')
+    rownames_to_column('protein_id') %>%
+    mutate(protein_id_stripped = sub("(^.*)\\.\\d+", "\\1", protein_id)) %>%
+    inner_join(conv, by="protein_id_stripped") %>%
+    dplyr::select(-protein_id_stripped)
+  
   
   crosstab <- psms(msnid) %>%
     dplyr::select(accession, peptide, percentAACoverage) %>%
@@ -379,8 +386,11 @@ assess_noninferable_proteins <- function(msnid, collapse="|") {
 
 #' @export
 #' @rdname motrpac_bic_output
-compute_protein_coverage <- function(msnid, fasta) {
+compute_protein_coverage <- function(msnid, path_to_FASTA) {
   
+  fasta <- readAAStringSet(path_to_FASTA)
+  names(fasta) <- sub("^(\\S+)\\s.*", "\\1", names(fasta))
+                                             
   if(any(duplicated(names(fasta)))) {
         stop("FASTA entry names are not unique!")
   }
@@ -390,6 +400,8 @@ compute_protein_coverage <- function(msnid, fasta) {
   }
   
   get_coverage_for_single_protein <- function(protein_i, ids, fasta) {
+    
+    
     
     x <- ids %>% 
       filter(Protein == protein_i) %>%
