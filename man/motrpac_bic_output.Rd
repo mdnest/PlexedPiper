@@ -56,7 +56,7 @@ assess_redundant_protein_matches(msnid, collapse = "|")
 
 assess_noninferable_proteins(msnid, collapse = "|")
 
-compute_protein_coverage(msnid, fasta)
+compute_protein_coverage(msnid, path_to_FASTA)
 }
 \arguments{
 \item{msnid}{(MSnID-object) final filtered version of MSnID object}
