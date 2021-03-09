@@ -62,100 +62,10 @@
 #' @rdname motrpac_bic_output
 make_rii_peptide_gl <- function(msnid, masic_data, fractions, samples, 
                                 references, org_name = "Rattus norvegicus") {
+  ## Make RII study design tables
   samples_rii <- samples %>%
     mutate(MeasurementName = case_when(is.na(MeasurementName) ~ paste0("Ref", "_", PlexID),
                                        TRUE ~ MeasurementName))
-  
-  
-  references_rii <- references %>%
-    mutate(Reference = 1)
-  
-  aggregation_level <- c("accession", "peptide")
-  crosstab <- create_crosstab(msnid, 
-                              masic_data, 
-                              aggregation_level, 
-                              fractions, samples_rii, references_rii)
-  
-  crosstab <- 2^crosstab # undo log2
-  
-  x <- fetch_conversion_table(org_name, from = "REFSEQ", "SYMBOL")
-  y <- fetch_conversion_table(org_name, from = "REFSEQ", "ENTREZID")
-  conv <- inner_join(x, y) %>% 
-    dplyr::rename(protein_id_stripped = REFSEQ,
-                  gene_symbol = SYMBOL,
-                  entrez_id = ENTREZID)
-  
-  crosstab <- crosstab %>% 
-    as.data.frame() %>% 
-    rownames_to_column('ids') %>% 
-    mutate(protein_id = sub("(^.*\\.\\d+)@.*", "\\1", ids),
-           sequence = sub("(^.*)@(.*)", "\\2", ids),
-           organism_name = org_name) %>% 
-    mutate(protein_id_stripped = sub("(^.*)\\.\\d+", "\\1", protein_id)) %>%
-    dplyr::select(-ids) %>%
-    inner_join(conv, by="protein_id_stripped") %>% 
-    dplyr::select(-protein_id_stripped) %>%
-    dplyr::select(organism_name,  gene_symbol, entrez_id, protein_id, sequence, everything())
-  
-  return(crosstab)
-  
-}
-
-
-#' @export
-#' @rdname motrpac_bic_output
-make_results_ratio_gl <- function(msnid, masic_data, fractions, samples, 
-                                  references, org_name = "Rattus norvegicus") {
-  aggregation_level <- c("accession")
-  crosstab <- create_crosstab(msnid, masic_data, aggregation_level, fractions,
-                              samples, references)
-  
-  x <- fetch_conversion_table(org_name, from = "REFSEQ", "SYMBOL")
-  y <- fetch_conversion_table(org_name, from = "REFSEQ", "ENTREZID")
-  conv <- inner_join(x, y) %>% 
-    dplyr::rename(protein_id_stripped = REFSEQ,
-                  gene_symbol = SYMBOL,
-                  entrez_id = ENTREZID)
-    
-  
-  crosstab <- crosstab %>% 
-    as.data.frame() %>% 
-    rownames_to_column('protein_id') %>%
-    mutate(protein_id_stripped = sub("(^.*)\\.\\d+", "\\1", protein_id)) %>%
-    inner_join(conv, by="protein_id_stripped") %>%
-    dplyr::select(-protein_id_stripped)
-  
-  
-  crosstab <- psms(msnid) %>%
-    dplyr::select(accession, peptide, percentAACoverage) %>%
-    group_by(accession, percentAACoverage) %>%
-    summarize(num_peptides = n()) %>%
-    dplyr::rename(protein_id = accession, percent_coverage=percentAACoverage) %>%
-    left_join(crosstab, .)
-  
-  crosstab <- crosstab %>%
-    #dplyr::mutate(protein_id = sub("(.P_.*\\.\\d+)", "\\1", protein_id),
-    dplyr::mutate(organism_name = org_name)
-  
-  results_ratio <- inner_join(crosstab, conv) %>% 
-    dplyr::select(organism_name, gene_symbol, entrez_id,
-                  protein_id, num_peptides, percent_coverage,
-                  everything())
-  
-  return(results_ratio)
-}
-
-
-#' @export
-#' @rdname motrpac_bic_output
-make_rii_peptide_ph <- function(msnid, masic_data, fractions, samples, references,
-                                org_name = "Rattus norvegicus", sep="_") {
-  ## Make rii study design tables
-  samples_rii <- samples %>%
-    mutate(MeasurementName = case_when(is.na(MeasurementName) ~ paste0("Ref", "_", PlexID),
-                                       TRUE ~ MeasurementName))
-  
-  
   references_rii <- references %>%
     mutate(Reference = 1)
   
@@ -165,69 +75,173 @@ make_rii_peptide_ph <- function(msnid, masic_data, fractions, samples, reference
                               masic_data, 
                               aggregation_level, 
                               fractions, samples_rii, references_rii)
+  crosstab <- 2^crosstab # undo log2
+  
+  crosstab <- as.data.frame(crosstab) %>%
+    rownames_to_column("Specie")
+  
+  ## Create RII peptide table
+  rii_peptide <- crosstab %>%
+    select(Specie) %>%
+    mutate(protein_id = sub("(^.*\\.\\d+)@.*", "\\1", Specie),
+           sequence = sub("(^.*)@(.*)", "\\2", Specie),
+           organism_name = org_name) %>%
+    mutate(REFSEQ = sub("(^.*)\\.\\d+", "\\1", protein_id))
+  
+  ## Attach Gene symbol and Entrez ID
+  conv <- fetch_conversion_table(org_name, from = "REFSEQ", "SYMBOL")
+  
+  conv <- fetch_conversion_table(org_name, from = "REFSEQ", "ENTREZID") %>%
+    inner_join(., conv)
+  
+  rii_peptide <- rii_peptide %>%
+    inner_join(conv) %>%
+    rename(gene_symbol = SYMBOL,
+           entrez_id = ENTREZID) %>%
+    select(-REFSEQ)
+  
+  ## Additional info from MS/MS
+  ids <- psms(msnid) %>%
+    select(accession, peptide, redundantAccessions, MSGFDB_SpecEValue) %>%
+    rename(protein_id = accession,
+           sequence = peptide,
+           redundant_accessions = redundantAccessions) %>%
+    group_by(protein_id, sequence, redundant_accessions) %>%
+    summarize(peptide_score = min(MSGFDB_SpecEValue))
+  
+  rii_peptide <- inner_join(rii_peptide, ids)
+  
+  ## Join with crosstab
+  rii_peptide <- inner_join(rii_peptide, crosstab) %>%
+    select(-Specie)
+  
+  return(rii_peptide)
+}
+
+
+#' @export
+#' @rdname motrpac_bic_output
+make_results_ratio_gl <- function(msnid, masic_data, fractions, samples, 
+                                  references, org_name = "Rattus norvegicus") {
+  ## Create crosstab
+  aggregation_level <- c("accession")
+  crosstab <- create_crosstab(msnid, masic_data, aggregation_level, fractions,
+                              samples, references)
+  
+  crosstab <- as.data.frame(crosstab) %>%
+    rownames_to_column("protein_id")
+  
+  ## Create results ratio table
+  results_ratio <- crosstab %>%
+    select(protein_id) %>%
+    mutate(REFSEQ = sub("(^.*)\\.\\d+", "\\1", protein_id))
+  
+  ## Attach Gene symbol and Entrez ID
+  conv <- fetch_conversion_table(org_name, from = "REFSEQ", "SYMBOL")
+  
+  conv <- fetch_conversion_table(org_name, from = "REFSEQ", "ENTREZID") %>%
+    inner_join(., conv)
+  
+  results_ratio <- results_ratio %>%
+    inner_join(conv) %>%
+    rename(gene_symbol = SYMBOL,
+           entrez_id = ENTREZID) %>%
+    select(-REFSEQ)
+    
+  
+  ## Additional info from MS/MS
+  ids <- psms(msnid) %>%
+    select(accession, peptide, noninferableProteins, percentAACoverage,
+           MSGFDB_SpecEValue) %>%
+    rename(protein_id = accession,
+           sequence = peptide,
+           noninferable_proteins = noninferableProteins,
+           percent_coverage = percentAACoverage) %>%
+    group_by(protein_id, sequence, noninferable_proteins, percent_coverage) %>%
+    summarize(peptide_score = min(MSGFDB_SpecEValue)) %>%
+    group_by(protein_id, noninferable_proteins, percent_coverage) %>%
+    summarize(protein_score = min(peptide_score),
+              num_peptides = n()) 
+  
+  results_ratio <- inner_join(results_ratio, ids)
+  
+  ## Join with crosstab
+  results_ratio <- inner_join(results_ratio, crosstab)
+  
+  return(results_ratio)
+}
+
+
+#' @export
+#' @rdname motrpac_bic_output
+make_rii_peptide_ph <- function(msnid, masic_data, fractions, samples, references,
+                                org_name = "Rattus norvegicus", sep="_") {
+  ## Make RII study design tables
+  samples_rii <- samples %>%
+    mutate(MeasurementName = case_when(is.na(MeasurementName) ~ paste0("Ref", "_", PlexID),
+                                       TRUE ~ MeasurementName))
+  
+  
+  references_rii <- references %>%
+    mutate(Reference = 1)
+  
+  ## Create crosstab
+  aggregation_level <- c("accession", "peptide", "SiteID")
+  crosstab <- create_crosstab(msnid, 
+                              masic_data, 
+                              aggregation_level, 
+                              fractions, samples_rii, references_rii)
   
   crosstab <- 2^crosstab # undo log2
   
-  ## Get protein IDs
-  crosstab <- crosstab %>% 
-    as.data.frame() %>% 
-    rownames_to_column("Specie") %>% 
-    mutate(protein_id = sub("(^.*\\.\\d+)@.*", "\\1", Specie),
-           sequence = sub("(^.*)@(.*)", "\\2", Specie)) %>% 
-    dplyr::select(protein_id, sequence, everything(), -Specie)
+  crosstab <- as.data.frame(crosstab) %>%
+    rownames_to_column("Specie")
+  
+  ## Create RII peptide table
+  rii_peptide <- crosstab %>%
+    select(Specie) %>%
+    mutate(protein_id = sub("(^.*)@(.*)@(.*)", "\\1", Specie),
+           sequence = sub("(^.*)@(.*)@(.*)", "\\2", Specie),
+           ptm_id = sub("(^.*)@(.*)@(.*)", "\\3", Specie),
+           organism_name = org_name) %>%
+    mutate(REFSEQ = sub("(^.*)\\.\\d+", "\\1", protein_id))
   
   
-  msms_data <- dplyr::select(psms(msnid),
-                        ptm_id = SiteID,
-                        protein_id = accession,
-                        sequence = peptide)
   ## Add Genes + EntrezID
-  x <- fetch_conversion_table(org_name, from = "REFSEQ", "SYMBOL")
-  y <- fetch_conversion_table(org_name, from = "REFSEQ", "ENTREZID")
-  conv <- inner_join(x, y) %>% 
-    dplyr::rename(protein_id_stripped = REFSEQ,
-                  gene_symbol = SYMBOL,
-                  entrez_id = ENTREZID)
-  crosstab <- crosstab %>%
-    dplyr::mutate(protein_id_stripped = sub("(.P_.*)\\.\\d+", "\\1", protein_id)) %>%
-    inner_join(conv) %>%
-    dplyr::select(-protein_id_stripped)
+  conv <- fetch_conversion_table(org_name, from = "REFSEQ", "SYMBOL")
   
-  ## Add flanking peptides and redundant peptides
+  conv <- fetch_conversion_table(org_name, from = "REFSEQ", "ENTREZID") %>%
+    inner_join(., conv)
   
-  msms_data <- dplyr::select(psms(msnid),
-                             protein_id = accession,
-                             sequence = peptide,
-                             ptm_id = SiteID,
-                             redundant_accessions=redundantAccessions,
-                             flanking_sequence=flankingSequence) %>%
-    distinct() %>% 
-    mutate(ptm_peptide = paste0(ptm_id, "-", sequence))
+  rii_peptide <- inner_join(rii_peptide, conv) %>%
+    rename(gene_symbol = SYMBOL,
+           entrez_id = ENTREZID) %>%
+    select(-REFSEQ)
   
-  crosstab <- left_join(crosstab, msms_data) 
   
-  ## Add max A-score and minimal MSGF SpecEvalue
+  ## Additional info from MS/MS
+  ids <- psms(msnid) %>%
+    select(accession, peptide, SiteID,
+           flankingSequence, redundantAccessions, MSGFDB_SpecEValue, maxAScore) %>%
+    rename(protein_id = accession,
+           sequence = peptide,
+           ptm_id = SiteID,
+           flanking_sequence = flankingSequence,
+           redundant_accessions = redundantAccessions) %>%
+    group_by(protein_id, sequence, ptm_id, flanking_sequence, redundant_accessions) %>%
+    summarize(peptide_score = min(MSGFDB_SpecEValue),
+              confident_score = max(maxAScore)) %>%
+    mutate(confident_site = case_when(confident_score >= 17 ~ TRUE,
+                                      confident_score < 17 ~ FALSE))
   
-  msms_data <- dplyr::select(psms(msnid),
-                             ptm_id = SiteID,
-                             confident_score = maxAScore,
-                             MSGFDB_SpecEValue) %>% 
-    group_by(ptm_id) %>% 
-    summarize(confident_score = max(confident_score),
-              MSGFDB_SpecEValue = min(MSGFDB_SpecEValue))
+  rii_peptide <- inner_join(rii_peptide, ids) %>%
+    mutate(ptm_id = gsub("-", sep, ptm_id))
   
-  crosstab <- left_join(crosstab, msms_data) %>% 
-    mutate(confident_site = dplyr::case_when(confident_score >= 17 ~ TRUE,
-                                             confident_score < 17 ~ FALSE),
-           ptm_id = gsub("-", sep, ptm_id),
-           ptm_peptide = gsub("-", sep, ptm_peptide),
-           organism_name = org_name) %>% 
-    dplyr::select(organism_name, gene_symbol, entrez_id, protein_id,
-                  sequence, ptm_id, ptm_peptide,
-                  MSGFDB_SpecEValue, flanking_sequence, redundant_accessions,
-                  confident_score, confident_site, everything()) %>% 
-    distinct()
-  return(crosstab)
+  ## Join with crosstab
+  rii_peptide <- inner_join(rii_peptide, crosstab) %>%
+    select(-Specie)
+  
+  return(rii_peptide)
 }
 
 #' @export
@@ -235,49 +249,58 @@ make_rii_peptide_ph <- function(msnid, masic_data, fractions, samples, reference
 make_results_ratio_ph <- function(msnid, masic_data, fractions, samples, 
                                   references, org_name = "Rattus norvegicus", sep="_") {
   
-  aggregation_level <- c("SiteID")
+  aggregation_level <- c("accession", "SiteID")
   crosstab <- create_crosstab(msnid, masic_data, aggregation_level, fractions,
                               samples, references)
-  crosstab <- crosstab %>% 
-    as.data.frame() %>% 
-    rownames_to_column('ptm_id') %>% 
-    mutate(protein_id = sub("(.P_.*\\.\\d+)-.*", "\\1", ptm_id))
+  crosstab <- as.data.frame(crosstab) %>% 
+    rownames_to_column('Specie')
   
-  x <- fetch_conversion_table(org_name, from = "REFSEQ", "SYMBOL")
-  y <- fetch_conversion_table(org_name, from = "REFSEQ", "ENTREZID")
-  conv <- inner_join(x, y) %>% 
-    dplyr::rename(protein_id_stripped = REFSEQ,
-                  gene_symbol = SYMBOL,
-                  entrez_id = ENTREZID)
-  crosstab <- crosstab %>%
-    dplyr::mutate(protein_id_stripped = sub("(.P_.*)\\.\\d+", "\\1", protein_id)) %>%
-    inner_join(conv) %>%
-    dplyr::select(-protein_id_stripped)
+  ## Create RII peptide table
+  results_ratio <- crosstab %>%
+    select(Specie) %>%
+    mutate(protein_id = sub("(^.*)@(.*)", "\\1", Specie),
+           ptm_id = sub("(^.*)@(.*)", "\\2", Specie),
+           organism_name = org_name) %>%
+    mutate(REFSEQ = sub("(^.*)\\.\\d+", "\\1", protein_id))
   
-  ascore <- dplyr::select(psms(msnid), protein_id = accession, 
-                          ptm_id = SiteID, 
-                          peptide = Peptide,
-                          flanking_sequence= flankingSequence,
-                          redundant_accessions,
-                          confident_score = maxAScore) %>% 
-    #mutate(protein_id = sub("(.P_.*)\\.\\d+", "\\1", protein_id)) %>% 
-    group_by(protein_id, ptm_id, peptide, flanking_sequence, redundant_accessions) %>% 
-    summarize(confident_score = max(confident_score))
+  ## Add Genes + EntrezID
+  conv <- fetch_conversion_table(org_name, from = "REFSEQ", "SYMBOL")
   
-  crosstab <- left_join(crosstab, ascore)
+  conv <- fetch_conversion_table(org_name, from = "REFSEQ", "ENTREZID") %>%
+    inner_join(., conv)
   
-  crosstab <- crosstab %>% 
-    mutate(confident_site = dplyr::case_when(confident_score >= 17 ~ TRUE,
-                                             confident_score < 17 ~ FALSE),
-           ptm_id = gsub("-", sep, ptm_id),
-           organism_name = org_name) %>% 
-    dplyr::select(organism_name, gene_symbol, entrez_id, protein_id,
-                  ptm_id, peptide,
-                  flanking_sequence, redundant_accessions,
-                  confident_score, confident_site, everything())
-  crosstab[, c(11:ncol(crosstab))] <- signif(crosstab[, c(11:ncol(crosstab))], 3)
-  return(crosstab)
+  results_ratio <- inner_join(results_ratio, conv) %>%
+    rename(gene_symbol = SYMBOL,
+           entrez_id = ENTREZID) %>%
+    select(-REFSEQ)
   
+  ## Additional info from MS/MS
+  ids <- psms(msnid) %>%
+    select(accession, peptide, SiteID,
+           flankingSequence, MSGFDB_SpecEValue, maxAScore) %>%
+    rename(protein_id = accession,
+           sequence = peptide,
+           ptm_id = SiteID,
+           flanking_sequence = flankingSequence) %>%
+    # group at peptide level to calculate peptide score, confident score
+    group_by(protein_id, sequence, ptm_id, flanking_sequence) %>%
+    summarize(peptide_score = min(MSGFDB_SpecEValue),
+              confident_score = max(maxAScore)) %>%
+    # regroup at siteID level and recalculate ptm score
+    group_by(protein_id, ptm_id, flanking_sequence) %>%
+    summarize(ptm_score = min(peptide_score),
+              confident_score = max(confident_score)) %>%
+    mutate(confident_site = case_when(confident_score >= 17 ~ TRUE,
+                                      confident_score < 17 ~ FALSE))
+  
+  results_ratio <- inner_join(results_ratio, ids) %>%
+    mutate(ptm_id = gsub("-", sep, ptm_id))
+  
+  ## Join with crosstab
+  results_ratio <- inner_join(results_ratio, crosstab) %>%
+    select(-Specie)
+  
+  return(results_ratio)
 }
 
 
@@ -292,7 +315,7 @@ map_flanking_sequence <- function (msnid, fasta, radius=7L, collapse="|") {
   # If there are multiple phosphosites on a single peptide then
   # they are pasted together.
   
-  if (!("SiteID" %in% colnames(msnid))) {
+  if (!("SiteID" %in% names(msnid))) {
     stop("No SiteID found. Call map_mod_sites.")
   }
   
