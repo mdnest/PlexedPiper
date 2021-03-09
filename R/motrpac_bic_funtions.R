@@ -25,7 +25,7 @@
 #'
 #' @importFrom dplyr select inner_join left_join mutate %>% case_when rename group_by summarize
 #' @importFrom tibble rownames_to_column
-#' @importFrom purrr map
+#' @importFrom purrr map map2
 #' @importFrom IRanges IRanges IRangesList reduce
 #'
 #'
