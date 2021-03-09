@@ -23,7 +23,7 @@
 #' @param org_name (character) Organism name. Default is 'Rattus norvegicus'
 #' @param sep (character) Single character used to concatenate protein, SiteID, and peptide
 #'
-#' @importFrom dplyr select inner_join left_join mutate %>% case_when rename group_by summarize summarize_all
+#' @importFrom dplyr select inner_join left_join mutate %>% case_when rename group_by summarize
 #' @importFrom tibble rownames_to_column
 #' @importFrom purrr map
 #' @importFrom IRanges IRanges IRangesList reduce
